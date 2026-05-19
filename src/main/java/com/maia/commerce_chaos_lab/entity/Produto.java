@@ -1,9 +1,6 @@
 package com.maia.commerce_chaos_lab.entity;
 
-import jakarta.persistence.Entity;
-import jakarta.persistence.GeneratedValue;
-import jakarta.persistence.GenerationType;
-import jakarta.persistence.Id;
+import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
@@ -28,5 +25,8 @@ public class Produto {
     private BigDecimal preco;
 
     private Integer estoque;
+
+    @Version
+    private Long version;
 
 }

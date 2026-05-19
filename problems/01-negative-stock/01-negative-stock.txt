@@ -1,0 +1,352 @@
+# 01 - Negative Stock
+
+## Objetivo
+
+Este cenário demonstra um dos problemas mais comuns em sistemas de ecommerce:
+
+- concorrência
+- race condition
+- inconsistência de estoque
+
+O objetivo é reproduzir o problema e evoluir soluções progressivamente.
+
+---
+
+# Cenário
+
+Produto:
+
+```txt
+PS5
+estoque = 1
+```
+
+Duas requisições simultâneas tentam comprar o mesmo item:
+
+```http
+POST /comprar/1
+```
+
+---
+
+# Fluxo Atual da Compra
+
+```txt
+Cliente
+   ↓
+Busca Produto
+   ↓
+Verifica Estoque
+   ↓
+Reduz Estoque
+   ↓
+Cria Pedido
+   ↓
+Salva no Banco
+```
+
+---
+
+# Implementação Inicial
+
+## CompraService
+
+```java
+@Service
+public class CompraService {
+
+    private final ProdutoRepository produtoRepository;
+    private final PedidoRepository pedidoRepository;
+
+    public CompraService(
+            ProdutoRepository produtoRepository,
+            PedidoRepository pedidoRepository
+    ) {
+        this.produtoRepository = produtoRepository;
+        this.pedidoRepository = pedidoRepository;
+    }
+
+    public String comprar(Long produtoId) {
+
+        Produto produto = produtoRepository.findById(produtoId)
+                .orElseThrow(() ->
+                        new RuntimeException("Produto não encontrado")
+                );
+
+        if (produto.getEstoque() <= 0) {
+            return "Produto sem estoque";
+        }
+
+        produto.setEstoque(
+                produto.getEstoque() - 1
+        );
+
+        produtoRepository.save(produto);
+
+        Pedido pedido = new Pedido();
+
+        pedido.setValorTotal(produto.getPreco());
+
+        pedido.setDataCriacao(LocalDateTime.now());
+
+        pedido.setStatus("REALIZADO");
+
+        pedidoRepository.save(pedido);
+
+        return "Compra realizada com sucesso";
+    }
+}
+```
+
+---
+
+# Problema Identificado
+
+O sistema não possui proteção concorrente.
+
+Quando duas threads executam ao mesmo tempo:
+
+```txt
+Thread 1 -> lê estoque = 1
+Thread 2 -> lê estoque = 1
+```
+
+As duas acreditam que existe estoque disponível.
+
+Resultado:
+
+```txt
+2 vendas aprovadas
+para apenas 1 produto
+```
+
+---
+
+# Simulação do Problema
+
+Para aumentar a chance da race condition acontecer, foi adicionado um delay artificial.
+
+---
+
+# Código Utilizado
+
+```java
+try {
+    Thread.sleep(5000);
+} catch (InterruptedException e) {
+    throw new RuntimeException(e);
+}
+```
+
+---
+
+# Fluxo Problemático
+
+```txt
+Thread 1 -> verifica estoque = 1
+Thread 2 -> verifica estoque = 1
+
+Thread 1 -> aguarda 5 segundos
+Thread 2 -> aguarda 5 segundos
+
+Thread 1 -> reduz estoque
+Thread 2 -> reduz estoque novamente
+```
+
+---
+
+# Resultado Esperado do Problema
+
+Possíveis resultados:
+
+- múltiplas compras aprovadas
+- inconsistência de estoque
+- venda acima do estoque real
+
+---
+
+# Impacto Real em Produção
+
+Esse tipo de falha pode causar:
+
+- prejuízo financeiro
+- cancelamentos
+- problemas logísticos
+- reclamações de clientes
+- inconsistência de inventário
+
+---
+
+# Primeira Tentativa de Solução
+
+## Estratégia
+
+Uso de `@Transactional`.
+
+---
+
+# Implementação
+
+```java
+@Transactional
+public String comprar(Long produtoId)
+```
+
+---
+
+# Código Atual
+
+```java
+@Service
+public class CompraService {
+
+    private final ProdutoRepository produtoRepository;
+    private final PedidoRepository pedidoRepository;
+
+    public CompraService(
+            ProdutoRepository produtoRepository,
+            PedidoRepository pedidoRepository
+    ) {
+        this.produtoRepository = produtoRepository;
+        this.pedidoRepository = pedidoRepository;
+    }
+
+    @Transactional
+    public String comprar(Long produtoId) {
+
+        Produto produto = produtoRepository.findById(produtoId)
+                .orElseThrow(() ->
+                        new RuntimeException("Produto não encontrado")
+                );
+
+        if (produto.getEstoque() <= 0) {
+            return "Produto sem estoque";
+        }
+
+        try {
+            Thread.sleep(5000);
+        } catch (InterruptedException e) {
+            throw new RuntimeException(e);
+        }
+
+        produto.setEstoque(
+                produto.getEstoque() - 1
+        );
+
+        produtoRepository.save(produto);
+
+        Pedido pedido = new Pedido();
+
+        pedido.setValorTotal(produto.getPreco());
+
+        pedido.setDataCriacao(LocalDateTime.now());
+
+        pedido.setStatus("REALIZADO");
+
+        pedidoRepository.save(pedido);
+
+        return "Compra realizada com sucesso";
+    }
+}
+```
+
+---
+
+# O que `@Transactional` resolve?
+
+A transação garante:
+
+- integridade
+- rollback
+- consistência parcial
+
+Exemplo:
+
+```txt
+Atualiza estoque
+↓
+Erro ao salvar pedido
+↓
+Rollback executado
+↓
+Estoque volta ao valor anterior
+```
+
+---
+
+# O que `@Transactional` NÃO resolve?
+
+Ele NÃO impede:
+
+```txt
+duas threads lendo o mesmo estoque simultaneamente
+```
+
+Ou seja:
+
+```txt
+@Transactional != controle concorrente
+```
+
+---
+
+# Resultado Após Uso de @Transactional
+
+## Situação
+
+Mesmo utilizando transação:
+
+❌ ainda é possível reproduzir race condition.
+
+---
+
+# Conclusão
+
+Apenas utilizar transações não resolve concorrência.
+
+O sistema ainda precisa de:
+
+- locking
+- controle concorrente
+- versionamento
+- proteção de atualização simultânea
+
+---
+
+# Próxima Evolução Planejada
+
+## Optimistic Locking
+
+Tecnologia:
+
+```java
+@Version
+```
+
+Objetivo:
+
+- detectar atualização concorrente
+- impedir múltiplas alterações simultâneas
+- garantir consistência do estoque
+
+---
+
+# Conceitos Estudados
+
+- concorrência
+- race condition
+- transações
+- rollback
+- integridade de dados
+- consistência
+- ecommerce resiliente
+
+---
+
+# Status Atual
+
+✅ Problema reproduzido
+
+✅ Primeira tentativa de solução aplicada
+
+ Optimistic Locking ainda não implementado
